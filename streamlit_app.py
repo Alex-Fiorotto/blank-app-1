@@ -1,10 +1,9 @@
 import streamlit as st
 import pandas as pd
 import re
-from io import BytesIO
 
 st.set_page_config(
-    page_title="Conversor TXT -> Lovable",
+    page_title="Conversor TXT → Lovable",
     layout="wide"
 )
 
@@ -22,39 +21,56 @@ if arquivo:
         errors="ignore"
     )
 
+    # =====================================================
+    # ESTABELECIMENTO
+    # =====================================================
+
     estabelecimento = ""
 
     m_est = re.search(
-        r'Estabelecimento:\s*\d+\s*-\s*([^\n\r]+)',
-        texto
+        r'Estabelecimento:\s*\d+\s*-\s*([A-Z0-9 ]+)',
+        texto,
+        re.IGNORECASE
     )
 
     if m_est:
         estabelecimento = m_est.group(1).strip()
 
-    m_pdv = re.search(
-        r'PDV:\s*(\d+)-PDV\d+-([^\n\r]+)',
-        texto
-    )
+    # =====================================================
+    # PDV
+    # =====================================================
 
     pdv_codigo = ""
     pdv_nome = ""
+
+    m_pdv = re.search(
+        r'(\d+)-PDV\d+-([A-Z0-9]+)',
+        texto
+    )
 
     if m_pdv:
         pdv_codigo = m_pdv.group(1).strip()
         pdv_nome = m_pdv.group(2).strip()
 
-    linhas = texto.splitlines()
+    # =====================================================
+    # PROCESSAMENTO
+    # =====================================================
 
-    registros = []
+    linhas = texto.splitlines()
 
     venda_atual = None
     nf_atual = None
     data_atual = None
 
+    registros = []
+
     for linha in linhas:
 
         linha = linha.strip()
+
+        # ==========================================
+        # VENDA
+        # ==========================================
 
         venda_match = re.search(
             r'Venda\/Sa(\d+)',
@@ -64,6 +80,10 @@ if arquivo:
         if venda_match:
             venda_atual = venda_match.group(1)
 
+        # ==========================================
+        # NF
+        # ==========================================
+
         nf_match = re.search(
             r'(NC\d+\/\d+)',
             linha
@@ -72,6 +92,10 @@ if arquivo:
         if nf_match:
             nf_atual = nf_match.group(1)
 
+        # ==========================================
+        # DATA
+        # ==========================================
+
         data_match = re.search(
             r'(\d{2}/\d{2}/\d{4})',
             linha
@@ -79,6 +103,10 @@ if arquivo:
 
         if data_match:
             data_atual = data_match.group(1)
+
+        # ==========================================
+        # ITEM
+        # ==========================================
 
         item_match = re.search(
             r'(\d{6})(.+?)(\d+,\d+)UN\s+(\d+,\d+)\s+\d+,\d+\s+(\d+,\d+)',
@@ -127,18 +155,90 @@ if arquivo:
                 "valor_total": float(valor_total)
             })
 
+    # =====================================================
+    # DATAFRAME
+    # =====================================================
+
     df = pd.DataFrame(registros)
 
-    if not df.empty:
+    if df.empty:
+        st.error("Nenhum registro encontrado.")
+        st.stop()
 
-        st.success(
-            f"{len(df)} registros encontrados"
-        )
+    # =====================================================
+    # CONVERTER DATA
+    # =====================================================
 
-        st.dataframe(
-            df.head(50),
-            use_container_width=True
-        )
+    df["data_venda"] = pd.to_datetime(
+        df["data_venda"],
+        format="%d/%m/%Y",
+        errors="coerce"
+    )
+
+    df["data_venda"] = df["data_venda"].dt.strftime(
+        "%Y-%m-%d"
+    )
+
+    # =====================================================
+    # ESTATÍSTICAS
+    # =====================================================
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric(
+        "Registros",
+        len(df)
+    )
+
+    col2.metric(
+        "Vendas",
+        df["venda"].nunique()
+    )
+
+    col3.metric(
+        "Itens",
+        df["item_codigo"].nunique()
+    )
+
+    col4.metric(
+        "Faturamento",
+        f"R$ {df['valor_total'].sum():,.2f}"
+    )
+
+    # =====================================================
+    # VISUALIZAÇÃO
+    # =====================================================
+
+    st.subheader("Prévia")
+
+    st.dataframe(
+        df.head(100),
+        use_container_width=True
+    )
+
+    # =====================================================
+    # DOWNLOAD CSV
+    # =====================================================
+
+    csv = df.to_csv(
+        index=False,
+        sep=";"
+    )
+
+    st.download_button(
+        "Baixar CSV para Lovable",
+        csv,
+        file_name=f"{pdv_codigo}_{pdv_nome}.csv",
+        mime="text/csv"
+    )
+
+    # =====================================================
+    # DOWNLOAD XLSX
+    # =====================================================
+
+    try:
+
+        from io import BytesIO
 
         output = BytesIO()
 
@@ -154,14 +254,13 @@ if arquivo:
             )
 
         st.download_button(
-            "Baixar XLSX",
+            "Baixar XLSX para Lovable",
             output.getvalue(),
-            file_name="vendas_lovable.xlsx",
+            file_name=f"{pdv_codigo}_{pdv_nome}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-    else:
-
-        st.error(
-            "Nenhum registro encontrado."
+    except Exception:
+        st.warning(
+            "openpyxl não instalado. O CSV continua disponível normalmente."
         )
